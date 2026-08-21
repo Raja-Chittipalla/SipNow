@@ -46,4 +46,18 @@ async function remove(req, res) {
   res.status(204).send();
 }
 
-module.exports = { list, getOne, create, update, remove };
+async function adjustStock(req, res) {
+  const { amount } = req.body;
+  const product = await Product.findById(req.params.id);
+  if (!product) return res.status(404).json({ message: "Product not found" });
+
+  if (product.stockQuantity !== undefined) {
+    product.stockQuantity = Math.max(0, product.stockQuantity + Number(amount));
+    product.inStock = product.stockQuantity > 0;
+    await product.save();
+  }
+
+  res.json(product);
+}
+
+module.exports = { list, getOne, create, update, remove, adjustStock };

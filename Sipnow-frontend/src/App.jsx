@@ -12,6 +12,7 @@ import AmbientBackground from "./components/AmbientBackground.jsx";
 import Navbar from "./components/Navbar.jsx";
 import QuizModal from "./components/QuizModal.jsx";
 import { useProducts } from "./hooks/useProducts.js";
+import { apiPatch } from "./utils/api.js";
 
 // Rendered before any route is reached, so it stays a static import.
 import AgeVerification from "./pages/age-verification.jsx";
@@ -200,6 +201,30 @@ export default function App() {
   }, [user?.email, wishlistItems]);
 
   useEffect(() => {
+    if (products.length > 0 && cartItems.length > 0) {
+      setCartItems((current) => {
+        let changed = false;
+        const updated = current.map((item) => {
+          const dbProduct = products.find((p) => p.name === item.product.name);
+          if (dbProduct && dbProduct.stockQuantity !== item.product.stockQuantity) {
+            changed = true;
+            return {
+              ...item,
+              product: {
+                ...item.product,
+                stockQuantity: dbProduct.stockQuantity,
+                inStock: dbProduct.inStock,
+              },
+            };
+          }
+          return item;
+        });
+        return changed ? updated : current;
+      });
+    }
+  }, [products]);
+
+  useEffect(() => {
     if (!wishlistNotice) return undefined;
     const timer = window.setTimeout(() => setWishlistNotice(null), 3500);
     return () => window.clearTimeout(timer);
@@ -243,6 +268,14 @@ export default function App() {
         : [{ packSize: 1, quantity: selections }]
     ).filter(({ quantity }) => Number(quantity) > 0);
 
+    normalizedSelections.forEach(({ packSize = 1, quantity }) => {
+      const unitsChange = (Number(quantity) || 0) * (Number(packSize) || 1);
+      if (product._id) {
+        apiPatch(`/products/${product._id}/stock`, { amount: -unitsChange })
+          .catch((err) => console.error("Failed to update stock on add", err));
+      }
+    });
+
     setCartItems((current) =>
       normalizedSelections.reduce((items, { packSize = 1, quantity }) => {
         const numericPackSize = Number(packSize) || 1;
@@ -256,13 +289,31 @@ export default function App() {
         return existingLine
           ? items.map((item) =>
               item === existingLine
-                ? { ...item, quantity: item.quantity + numericQuantity }
+                ? {
+                    ...item,
+                    quantity: item.quantity + numericQuantity,
+                    product: {
+                      ...item.product,
+                      stockQuantity: Math.max(
+                        0,
+                        (item.product.stockQuantity ?? 0) -
+                          numericQuantity * numericPackSize
+                      ),
+                    },
+                  }
                 : item
             )
           : [
               ...items,
               {
-                product,
+                product: {
+                  ...product,
+                  stockQuantity: Math.max(
+                    0,
+                    (product.stockQuantity ?? 0) -
+                      numericQuantity * numericPackSize
+                  ),
+                },
                 packSize: numericPackSize,
                 quantity: numericQuantity,
               },
@@ -271,7 +322,24 @@ export default function App() {
     );
   };
 
-  const updateCartQuantity = (productName, packSize = 1, quantity) =>
+  const updateCartQuantity = (productName, packSize = 1, quantity) => {
+    const existing = cartItems.find(
+      (item) =>
+        item.product.name === productName && (item.packSize ?? 1) === packSize
+    );
+    if (!existing) return;
+
+    const diff = quantity - existing.quantity;
+    if (diff === 0) return;
+
+    const unitsChange = diff * packSize;
+
+    if (existing.product._id) {
+      apiPatch(`/products/${existing.product._id}/stock`, {
+        amount: -unitsChange,
+      }).catch((err) => console.error("Failed to update stock", err));
+    }
+
     setCartItems((current) =>
       quantity <= 0
         ? current.filter(
@@ -282,14 +350,22 @@ export default function App() {
         : current.map((item) =>
             item.product.name === productName &&
             (item.packSize ?? 1) === packSize
-              ? { ...item, quantity }
+              ? {
+                  ...item,
+                  quantity,
+                  product: {
+                    ...item.product,
+                    stockQuantity: Math.max(
+                      0,
+                      (item.product.stockQuantity ?? 0) - unitsChange
+                    ),
+                  },
+                }
               : item
           )
     );
+  };
 
-  // Product pickers submit their complete selection for each visible pack
-  // size. Replacing only those lines prevents a "3 then minus 1" action from
-  // being treated as another add and correctly saves the line as 2.
   const updateCartSelections = (product, selections = []) => {
     const nextSelections = selections.map(({ packSize = 1, quantity }) => ({
       packSize: Number(packSize) || 1,
@@ -299,6 +375,34 @@ export default function App() {
       nextSelections.map(({ packSize }) => packSize)
     );
 
+    let totalUnitsChange = 0;
+    nextSelections.forEach(({ packSize, quantity }) => {
+      const existing = cartItems.find(
+        (item) =>
+          item.product.name === product.name &&
+          (item.packSize ?? 1) === packSize
+      );
+      const oldQty = existing ? existing.quantity : 0;
+      totalUnitsChange += (quantity - oldQty) * packSize;
+    });
+
+    cartItems.forEach((item) => {
+      if (
+        item.product.name === product.name &&
+        !selectedPackSizes.has(item.packSize ?? 1)
+      ) {
+        totalUnitsChange -= item.quantity * (item.packSize ?? 1);
+      }
+    });
+
+    if (totalUnitsChange !== 0 && product._id) {
+      apiPatch(`/products/${product._id}/stock`, {
+        amount: -totalUnitsChange,
+      }).catch((err) =>
+        console.error("Failed to update stock on selections", err)
+      );
+    }
+
     setCartItems((current) => {
       const unchangedItems = current.filter(
         (item) =>
@@ -307,19 +411,52 @@ export default function App() {
       );
       const updatedLines = nextSelections
         .filter(({ quantity }) => quantity > 0)
-        .map(({ packSize, quantity }) => ({ product, packSize, quantity }));
+        .map(({ packSize, quantity }) => {
+          const existing = current.find(
+            (item) =>
+              item.product.name === product.name &&
+              (item.packSize ?? 1) === packSize
+          );
+          const oldQty = existing ? existing.quantity : 0;
+          const currentProd = existing ? existing.product : product;
+          return {
+            product: {
+              ...currentProd,
+              stockQuantity: Math.max(
+                0,
+                (currentProd.stockQuantity ?? 0) -
+                  (quantity - oldQty) * packSize
+              ),
+            },
+            packSize,
+            quantity,
+          };
+        });
 
       return [...unchangedItems, ...updatedLines];
     });
   };
 
-  const removeFromCart = (productName, packSize = 1) =>
+  const removeFromCart = (productName, packSize = 1) => {
+    const existing = cartItems.find(
+      (item) =>
+        item.product.name === productName && (item.packSize ?? 1) === packSize
+    );
+    if (existing) {
+      const unitsRefund = existing.quantity * packSize;
+      if (existing.product._id) {
+        apiPatch(`/products/${existing.product._id}/stock`, {
+          amount: unitsRefund,
+        }).catch((err) => console.error("Failed to refund stock", err));
+      }
+    }
     setCartItems((current) =>
       current.filter(
         (item) =>
           item.product.name !== productName || (item.packSize ?? 1) !== packSize
       )
     );
+  };
 
   const isWishlisted = (product) =>
     wishlistItems.some((item) => item.name === product.name);

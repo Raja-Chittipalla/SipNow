@@ -9,6 +9,20 @@ export async function apiGet(path) {
   return res.json();
 }
 
+export async function apiPatch(path, body) {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Request failed: ${path}`);
+  }
+  return res.json();
+}
+
 export function resolveImageUrl(image) {
   return image?.startsWith("/") ? `${SERVER_ORIGIN}${image}` : image;
 }

@@ -52,6 +52,13 @@ function CartRow({ item, onRemove, onUpdateQuantity }) {
           </Link>
         )}
 
+        {product.stockQuantity !== undefined && (
+          <div className="mt-1 text-xs text-on-surface-variant/80 flex items-center gap-1.5">
+            <span className={`inline-block h-2 w-2 rounded-full ${product.stockQuantity > 0 ? "bg-green-500" : "bg-red-500"}`} />
+            <span>Stock: <span className="font-semibold text-primary">{product.stockQuantity}</span> remaining</span>
+          </div>
+        )}
+
         {/* Quantity Controls */}
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
@@ -77,10 +84,11 @@ function CartRow({ item, onRemove, onUpdateQuantity }) {
             {/* Increase */}
             <button
               aria-label={`Increase ${product.name} quantity`}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-outline-variant/40 bg-transparent text-on-surface-variant transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-outline-variant/40 bg-transparent text-on-surface-variant transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-outline-variant/40 disabled:hover:text-on-surface-variant"
               onClick={() =>
                 onUpdateQuantity(product.name, packSize, quantity + 1)
               }
+              disabled={product.stockQuantity !== undefined && product.stockQuantity < packSize}
               type="button"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>

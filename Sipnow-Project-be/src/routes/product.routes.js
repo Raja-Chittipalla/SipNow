@@ -6,6 +6,7 @@ const {
   create,
   update,
   remove,
+  adjustStock,
 } = require("../controllers/product.controller");
 const { validate } = require("../middleware/validate");
 const { requireAuth, requireAdmin } = require("../middleware/auth");
@@ -24,5 +25,6 @@ router.get("/:id", getOne);
 router.post("/", requireAuth, requireAdmin, productValidators, validate, create);
 router.put("/:id", requireAuth, requireAdmin, productValidators, validate, update);
 router.delete("/:id", requireAuth, requireAdmin, remove);
+router.patch("/:id/stock", adjustStock);
 
 module.exports = router;
